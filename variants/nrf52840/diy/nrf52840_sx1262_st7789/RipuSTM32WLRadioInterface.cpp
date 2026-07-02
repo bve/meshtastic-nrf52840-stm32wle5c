@@ -29,6 +29,7 @@ bool RipuSTM32WLRadioInterface::init()
     transport_.begin();
 
     bridgeReady_ = false;
+    sleeping_ = false;
     if (!transport_.resetBridge()) {
         LOG_WARN("RIPU STM32WL bridge reset/ready failed");
         return false;
@@ -70,13 +71,21 @@ bool RipuSTM32WLRadioInterface::canSleep()
 
 bool RipuSTM32WLRadioInterface::sleep()
 {
+    if (!bridgeReady_) {
+        return true;
+    }
     receiving_ = false;
     receiveActive_ = false;
+    txDelayActive_ = false;
     if (powerMon) {
         powerMon->clearState(meshtastic_PowerMon_State_Lora_RXOn);
         powerMon->clearState(meshtastic_PowerMon_State_Lora_TXOn);
     }
-    return transport_.sleep();
+    const bool ok = transport_.sleep();
+    if (ok) {
+        sleeping_ = true;
+    }
+    return ok;
 }
 
 ErrorCode RipuSTM32WLRadioInterface::send(meshtastic_MeshPacket *p)
@@ -101,6 +110,11 @@ ErrorCode RipuSTM32WLRadioInterface::send(meshtastic_MeshPacket *p)
     }
 
 #ifndef LORA_DISABLE_SENDING
+    if (sleeping_ && !startReceive()) {
+        packetPool.release(p);
+        return ERRNO_UNKNOWN;
+    }
+
     printPacket("enqueue for send", p);
     LOG_DEBUG("ripu txGood=%u,txRelay=%u,rxGood=%u,rxBad=%u", txGood_, txRelay_, rxGood_, rxBad_);
 
@@ -207,6 +221,9 @@ int32_t RipuSTM32WLRadioInterface::runOnce()
     if (!bridgeReady_) {
         return 1000;
     }
+    if (sleeping_) {
+        return 1000;
+    }
 
     serviceEvents();
     processTransmitQueue();
@@ -215,6 +232,10 @@ int32_t RipuSTM32WLRadioInterface::runOnce()
 
 bool RipuSTM32WLRadioInterface::configureBridge()
 {
+    if (!wakeBridge()) {
+        return false;
+    }
+
     RadioConfig bridgeConfig;
     bridgeConfig.frequencyHz = static_cast<uint32_t>(getFreq() * 1000000.0f + 0.5f);
     bridgeConfig.bandwidthKhzX10 = static_cast<uint16_t>(bw * 10.0f + 0.5f);
@@ -232,6 +253,10 @@ bool RipuSTM32WLRadioInterface::configureBridge()
 
 bool RipuSTM32WLRadioInterface::startReceive()
 {
+    if (!wakeBridge()) {
+        return false;
+    }
+
     if (!transport_.startRx()) {
         LOG_WARN("RIPU bridge startRx failed");
         return false;
@@ -243,6 +268,21 @@ bool RipuSTM32WLRadioInterface::startReceive()
         powerMon->setState(meshtastic_PowerMon_State_Lora_RXOn);
         powerMon->clearState(meshtastic_PowerMon_State_Lora_TXOn);
     }
+    return true;
+}
+
+bool RipuSTM32WLRadioInterface::wakeBridge()
+{
+    if (!sleeping_) {
+        return true;
+    }
+
+    if (!transport_.wake()) {
+        LOG_WARN("RIPU bridge wake failed");
+        return false;
+    }
+
+    sleeping_ = false;
     return true;
 }
 
@@ -377,6 +417,10 @@ bool RipuSTM32WLRadioInterface::startTransmit(meshtastic_MeshPacket *txp)
 {
     if (disabled || !config.lora.tx_enabled) {
         LOG_WARN("Drop Tx packet because LoRa Tx disabled");
+        packetPool.release(txp);
+        return false;
+    }
+    if (!wakeBridge()) {
         packetPool.release(txp);
         return false;
     }

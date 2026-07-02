@@ -34,6 +34,7 @@ class RipuSTM32WLRadioInterface : public RadioInterface, protected concurrency::
 
     bool configureBridge();
     bool startReceive();
+    bool wakeBridge();
     void stopReceiveState();
     void serviceEvents(bool force = false);
     void handleReceiveDone();
@@ -51,6 +52,7 @@ class RipuSTM32WLRadioInterface : public RadioInterface, protected concurrency::
     MeshPacketQueue txQueue_ = MeshPacketQueue(MAX_TX_QUEUE);
     RipuSTM32WLTransport transport_;
     bool bridgeReady_ = false;
+    bool sleeping_ = false;
     bool receiving_ = false;
     bool receiveActive_ = false;
     uint32_t receiveActiveStartedMs_ = 0;
