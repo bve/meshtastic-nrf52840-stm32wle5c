@@ -82,6 +82,7 @@ extern "C" {
 
 // ST7789 240x240 display over SPI via FPC.
 #define HAS_SCREEN 1
+#define HAS_SPI_TFT 1
 #define ST7789_VDD_EN (0 + 24) // P0.24 -> display VDD
 #define ST7789_CS_GROUNDED 1
 #define ST7789_NSS (0 + 15)    // Dummy CS; FPC CS is tied to GND on this PCB.
