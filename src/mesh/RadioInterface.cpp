@@ -309,6 +309,19 @@ extern RadioLibHal *RadioLibHAL;
 extern SPIClass SPI1;
 #endif
 
+#ifndef LORA_SPI_FREQUENCY
+#define LORA_SPI_FREQUENCY 4000000
+#endif
+
+std::unique_ptr<RadioInterface> __attribute__((weak))
+createVariantRadioInterface(LockingArduinoHal *hal, const SPISettings &spiSettings, LoRaRadioType &detectedRadioType)
+{
+    (void)hal;
+    (void)spiSettings;
+    (void)detectedRadioType;
+    return nullptr;
+}
+
 std::unique_ptr<RadioInterface> initLoRa()
 {
     std::unique_ptr<RadioInterface> rIf = nullptr;
@@ -316,7 +329,7 @@ std::unique_ptr<RadioInterface> initLoRa()
 #if ARCH_PORTDUINO
     SPISettings loraSpiSettings(portduino_config.spiSpeed, MSBFIRST, SPI_MODE0);
 #else
-    SPISettings loraSpiSettings(4000000, MSBFIRST, SPI_MODE0);
+    SPISettings loraSpiSettings(LORA_SPI_FREQUENCY, MSBFIRST, SPI_MODE0);
 #endif
 
 #ifdef ARCH_PORTDUINO
@@ -380,6 +393,17 @@ std::unique_ptr<RadioInterface> initLoRa()
 #endif
 
 // radio init MUST BE AFTER service.init, so we have our radio config settings (from nodedb init)
+#ifndef ARCH_PORTDUINO
+    if (!rIf) {
+        rIf = createVariantRadioInterface(loraHal, loraSpiSettings, radioType);
+        if (rIf && !rIf->init()) {
+            LOG_WARN("No variant radio");
+            rIf = nullptr;
+            radioType = NO_RADIO;
+        }
+    }
+#endif
+
 #if defined(USE_STM32WLx)
     if (!rIf) {
         rIf = std::unique_ptr<STM32WLE5JCInterface>(
