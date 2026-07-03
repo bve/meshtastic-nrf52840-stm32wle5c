@@ -19,8 +19,9 @@ extern "C" {
 #define PIN_3V3_EN (0 + 13)
 
 // LEDs / buttons
+// This board has no firmware-controllable status LED. P0.15 is the onboard LED on common ProMicro/SuperMini boards.
 #define PIN_LED1 (-1)
-#define LED_STATE_ON 1
+#define LED_STATE_ON 0
 #define PIN_BUTTON1 (0 + 6)   // SW1
 #define ALT_BUTTON_PIN (0 + 8) // SW2
 #define BUTTON_ACTIVE_LOW 1
@@ -85,7 +86,7 @@ extern "C" {
 #define HAS_SPI_TFT 1
 #define ST7789_VDD_EN (0 + 24) // P0.24 -> display VDD
 #define ST7789_CS_GROUNDED 1
-#define ST7789_NSS (0 + 15)    // Dummy CS; FPC CS is tied to GND on this PCB.
+#define ST7789_NSS (0 + 25) // Valid dummy CS; panel CS is tied to GND on this PCB.
 #define ST7789_RS (0 + 11)     // WR
 #define ST7789_SDA (0 + 22) // SDA / MOSI
 #define ST7789_SCK (0 + 17) // DC / SCLK

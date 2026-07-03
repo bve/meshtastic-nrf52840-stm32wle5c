@@ -236,6 +236,11 @@ bool RipuSTM32WLRadioInterface::configureBridge()
         return false;
     }
 
+    limitPower(kMaxTxPowerDbm);
+    if (power < kMinTxPowerDbm) {
+        power = kMinTxPowerDbm;
+    }
+
     RadioConfig bridgeConfig;
     bridgeConfig.frequencyHz = static_cast<uint32_t>(getFreq() * 1000000.0f + 0.5f);
     bridgeConfig.bandwidthKhzX10 = static_cast<uint16_t>(bw * 10.0f + 0.5f);
@@ -248,7 +253,11 @@ bool RipuSTM32WLRadioInterface::configureBridge()
     bridgeConfig.flags = ConfigExplicitHeader | ConfigCrcEnabled;
 
     LOG_INFO("RIPU bridge radio freq=%uHz bw=%.1fkHz sf=%u cr=4/%u pwr=%d", bridgeConfig.frequencyHz, bw, sf, cr, power);
-    return transport_.configure(bridgeConfig);
+    const bool ok = transport_.configure(bridgeConfig);
+    if (!ok) {
+        logBridgeRadioError("configure");
+    }
+    return ok;
 }
 
 bool RipuSTM32WLRadioInterface::startReceive()
@@ -259,6 +268,7 @@ bool RipuSTM32WLRadioInterface::startReceive()
 
     if (!transport_.startRx()) {
         LOG_WARN("RIPU bridge startRx failed");
+        logBridgeRadioError("startRx");
         return false;
     }
 
@@ -284,6 +294,14 @@ bool RipuSTM32WLRadioInterface::wakeBridge()
 
     sleeping_ = false;
     return true;
+}
+
+void RipuSTM32WLRadioInterface::logBridgeRadioError(const char *context)
+{
+    EventStatus event;
+    if (transport_.getEvent(event) && (event.events & EventRadioError)) {
+        LOG_WARN("RIPU bridge %s RadioLib error=%u", context, event.errorCode);
+    }
 }
 
 void RipuSTM32WLRadioInterface::stopReceiveState()

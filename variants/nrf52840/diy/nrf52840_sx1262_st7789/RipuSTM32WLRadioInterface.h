@@ -29,12 +29,15 @@ class RipuSTM32WLRadioInterface : public RadioInterface, protected concurrency::
     static constexpr uint32_t kFallbackEventPollMs = 250;
     static constexpr uint32_t kTxWatchdogMs = 60000;
     static constexpr uint8_t kSyncWord = 0x2B;
+    static constexpr int8_t kMinTxPowerDbm = -9;
+    static constexpr int8_t kMaxTxPowerDbm = 22;
 
     int32_t runOnce() override;
 
     bool configureBridge();
     bool startReceive();
     bool wakeBridge();
+    void logBridgeRadioError(const char *context);
     void stopReceiveState();
     void serviceEvents(bool force = false);
     void handleReceiveDone();
