@@ -89,4 +89,6 @@ void lateInitVariant()
 void variantDefaultConfig()
 {
     config.display.screen_on_secs = DISPLAY_TIMEOUT_SECS;
+    config.lora.region = meshtastic_Config_LoRaConfig_RegionCode_KZ_433;
+    config.lora.tx_power = 22;
 }

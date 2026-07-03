@@ -4,8 +4,10 @@
 #define PRIVATE_ST7789SPI_H
 
 #include "OLEDDisplay.h"
+#include "graphics/TFTColorRegions.h"
 #include <Arduino.h>
 #include <SPI.h>
+#include <cstring>
 #include "nrfx_coredep.h"
 
 struct TFTColorRegion {
@@ -52,6 +54,14 @@ struct TFTColorRegion {
 
 #ifndef ST7789_SPI_MODE
 #define ST7789_SPI_MODE SPI_MODE0
+#endif
+
+#ifndef ST7789_MAX_DMA_ROWS
+#define ST7789_MAX_DMA_ROWS 8
+#endif
+
+#ifndef ST7789_ENABLE_DIRTY_PAGES
+#define ST7789_ENABLE_DIRTY_PAGES 0
 #endif
 
 #ifndef TFT_OFFSET_X
@@ -123,6 +133,7 @@ class ST7789Spi : public OLEDDisplay {
             st7789DelayMs(120);
         }
         _connected = true;
+        invalidateFrame();
         return true;
     }
 
@@ -131,35 +142,33 @@ class ST7789Spi : public OLEDDisplay {
         if (!ensureConnected()) {
             return;
         }
-        ensureScanlineBuffer(displayWidth);
-        if (_scanlineBuf == nullptr) {
+        if (!ensureDmaBuffer()) {
             return;
         }
         applyBacklightBrightness();
 
+        const bool canUseShadow = ensureMonoShadow();
+        const uint32_t colorSignature = getColorSignature();
+        const bool redrawAll = _forceFullRedraw || !canUseShadow || colorSignature != _lastColorSignature;
+        uint8_t dirtyPages[kMaxBufferPages] = {};
+        const bool hasDirty = findDirtyPages(dirtyPages, redrawAll);
+
+        if (!hasDirty) {
+            return;
+        }
+
         select();
         _spi->beginTransaction(_spiSettings);
-        setAddrWindow(0, 0, displayWidth, displayHeight);
-
-        for (uint16_t y = 0; y < displayHeight; y++) {
-            for (uint16_t x = 0; x < displayWidth; x++) {
-#if defined(ST7789_SOFTWARE_ROTATE_90)
-                const uint16_t srcX = y;
-                const uint16_t srcY = displayHeight - 1 - x;
-#elif defined(ST7789_SOFTWARE_ROTATE_270)
-                const uint16_t srcX = displayWidth - 1 - y;
-                const uint16_t srcY = x;
-#else
-                const uint16_t srcX = x;
-                const uint16_t srcY = y;
-#endif
-                _scanlineBuf[x] = resolvePixelColorBe(srcX, srcY, isPixelSet(srcX, srcY));
-            }
-            _spi->transfer(reinterpret_cast<void *>(_scanlineBuf), nullptr, static_cast<uint32_t>(2 * displayWidth));
-        }
+        sendDirtyRuns(dirtyPages);
 
         _spi->endTransaction();
         deselect();
+
+        if (canUseShadow) {
+            memcpy(_monoShadow, buffer, displayBufferSize);
+        }
+        _lastColorSignature = colorSignature;
+        _forceFullRedraw = false;
     }
 
     void resetOrientation()
@@ -179,6 +188,7 @@ class ST7789Spi : public OLEDDisplay {
 
     void displayOn(void)
     {
+        invalidateFrame();
         sendCommand(ST77XX_DISPON);
         applyBacklightBrightness();
     }
@@ -187,6 +197,7 @@ class ST7789Spi : public OLEDDisplay {
         setBacklightRaw(false);
         sendCommand(ST77XX_DISPOFF);
         _connected = false;
+        invalidateFrame();
     }
 
     void setBrightness(uint8_t brightness) override
@@ -200,13 +211,18 @@ class ST7789Spi : public OLEDDisplay {
         _colorRegions = colorRegions;
         _onColorBe = swap16(color);
         _offColorBe = 0x0000;
+        invalidateFrame();
     }
 
     ~ST7789Spi() override
     {
-        if (_scanlineBuf != nullptr) {
-            free(_scanlineBuf);
-            _scanlineBuf = nullptr;
+        if (_dmaBuf != nullptr) {
+            free(_dmaBuf);
+            _dmaBuf = nullptr;
+        }
+        if (_monoShadow != nullptr) {
+            free(_monoShadow);
+            _monoShadow = nullptr;
         }
     }
 
@@ -257,6 +273,9 @@ class ST7789Spi : public OLEDDisplay {
 
   private:
     static constexpr uint8_t kNoPin = 0xFF;
+    static constexpr uint8_t kMaxBufferPages = 32;
+    static constexpr uint16_t kMinDmaRows = 1;
+    static constexpr uint16_t kMaxDmaRows = ST7789_MAX_DMA_ROWS;
 
     uint8_t _rst;
     uint8_t _dc;
@@ -271,8 +290,12 @@ class ST7789Spi : public OLEDDisplay {
     uint8_t _madctl = ST77XX_MADCTL_RGB;
     uint16_t _onColorBe = 0xFFFF;
     uint16_t _offColorBe = 0x0000;
-    uint16_t *_scanlineBuf = nullptr;
-    uint16_t _scanlineBufCapacity = 0;
+    uint16_t *_dmaBuf = nullptr;
+    uint16_t _dmaRows = 0;
+    uint8_t *_monoShadow = nullptr;
+    uint16_t _monoShadowSize = 0;
+    uint32_t _lastColorSignature = 0;
+    bool _forceFullRedraw = true;
     uint8_t _brightness = BRIGHTNESS_DEFAULT;
     TFTColorRegion *_colorRegions = nullptr;
 
@@ -331,6 +354,7 @@ class ST7789Spi : public OLEDDisplay {
     void setPanelOrientation(uint8_t madctl)
     {
         _madctl = madctl;
+        invalidateFrame();
         writeCommandData(ST77XX_MADCTL, _madctl);
     }
 
@@ -369,16 +393,157 @@ class ST7789Spi : public OLEDDisplay {
 #endif
     }
 
-    void ensureScanlineBuffer(uint16_t width)
+    bool ensureDmaBuffer()
     {
-        if (_scanlineBuf != nullptr && width <= _scanlineBufCapacity) {
+        if (_dmaBuf != nullptr) {
+            return true;
+        }
+
+        const uint16_t candidates[] = {kMaxDmaRows, 16, 8, kMinDmaRows};
+        uint16_t previousRows = 0;
+        for (uint16_t rows : candidates) {
+            rows = min(rows, displayHeight);
+            if (rows == 0 || rows == previousRows) {
+                continue;
+            }
+            previousRows = rows;
+            _dmaBuf = static_cast<uint16_t *>(malloc(static_cast<size_t>(displayWidth) * rows * sizeof(uint16_t)));
+            if (_dmaBuf != nullptr) {
+                _dmaRows = rows;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool ensureMonoShadow()
+    {
+#if !ST7789_ENABLE_DIRTY_PAGES
+        return false;
+#else
+        if (_monoShadow != nullptr && _monoShadowSize == displayBufferSize) {
+            return true;
+        }
+        if (_monoShadow != nullptr) {
+            free(_monoShadow);
+        }
+        _monoShadow = static_cast<uint8_t *>(malloc(displayBufferSize));
+        if (_monoShadow == nullptr) {
+            _monoShadowSize = 0;
+            return false;
+        }
+        _monoShadowSize = displayBufferSize;
+        memset(_monoShadow, 0xFF, displayBufferSize);
+        invalidateFrame();
+        return true;
+#endif
+    }
+
+    void invalidateFrame()
+    {
+        _forceFullRedraw = true;
+    }
+
+    uint32_t getColorSignature() const
+    {
+        if (_colorRegions == reinterpret_cast<TFTColorRegion *>(graphics::colorRegions)) {
+            return graphics::getTFTColorFrameSignature();
+        }
+        return (static_cast<uint32_t>(_onColorBe) << 16) ^ _offColorBe ^
+               static_cast<uint32_t>(reinterpret_cast<uintptr_t>(_colorRegions));
+    }
+
+    bool findDirtyPages(uint8_t *dirtyPages, bool redrawAll) const
+    {
+        bool hasDirty = false;
+        const uint16_t pages = _buffheight < kMaxBufferPages ? _buffheight : kMaxBufferPages;
+        for (uint16_t page = 0; page < pages; page++) {
+            const bool dirty =
+                redrawAll || memcmp(&buffer[page * displayWidth], &_monoShadow[page * displayWidth], displayWidth) != 0;
+            dirtyPages[page] = dirty ? 1 : 0;
+            hasDirty = hasDirty || dirty;
+        }
+        return hasDirty;
+    }
+
+    bool isDirtyRow(const uint8_t *dirtyPages, uint16_t y) const
+    {
+        const uint16_t page = y >> 3;
+        return page < kMaxBufferPages && dirtyPages[page] != 0;
+    }
+
+    void sendDirtyRuns(const uint8_t *dirtyPages)
+    {
+        uint16_t y = 0;
+        while (y < displayHeight) {
+            if (!isDirtyRow(dirtyPages, y)) {
+                y++;
+                continue;
+            }
+
+            const uint16_t startY = y;
+            uint16_t rows = 0;
+            while (y < displayHeight && rows < _dmaRows && isDirtyRow(dirtyPages, y)) {
+                rows++;
+                y++;
+            }
+
+            setAddrWindow(0, startY, displayWidth, rows);
+            renderRows(startY, rows);
+            _spi->transfer(reinterpret_cast<void *>(_dmaBuf), nullptr,
+                           static_cast<size_t>(displayWidth) * rows * sizeof(uint16_t));
+        }
+    }
+
+    void renderRows(uint16_t startY, uint16_t rows)
+    {
+        for (uint16_t row = 0; row < rows; row++) {
+            renderRow(startY + row, &_dmaBuf[static_cast<size_t>(row) * displayWidth]);
+        }
+    }
+
+    void renderRow(uint16_t y, uint16_t *dst)
+    {
+#if !defined(ST7789_SOFTWARE_ROTATE_90) && !defined(ST7789_SOFTWARE_ROTATE_270)
+        if (_colorRegions == reinterpret_cast<TFTColorRegion *>(graphics::colorRegions)) {
+            renderGraphicsColorRow(y, dst);
             return;
         }
-        if (_scanlineBuf != nullptr) {
-            free(_scanlineBuf);
+#endif
+        renderFallbackRow(y, dst);
+    }
+
+    void renderGraphicsColorRow(uint16_t y, uint16_t *dst)
+    {
+        graphics::beginTFTColorRow(y);
+        const uint8_t *src = &buffer[(y >> 3) * displayWidth];
+        const uint8_t mask = static_cast<uint8_t>(1u << (y & 0x07));
+        if (graphics::tftColorRowCount == 0) {
+            for (uint16_t x = 0; x < displayWidth; x++) {
+                dst[x] = (src[x] & mask) ? _onColorBe : _offColorBe;
+            }
+            return;
         }
-        _scanlineBuf = static_cast<uint16_t *>(malloc(width * sizeof(uint16_t)));
-        _scanlineBufCapacity = _scanlineBuf ? width : 0;
+        for (uint16_t x = 0; x < displayWidth; x++) {
+            dst[x] = graphics::resolveTFTColorPixelRow(x, (src[x] & mask) != 0, _onColorBe, _offColorBe);
+        }
+    }
+
+    void renderFallbackRow(uint16_t y, uint16_t *dst)
+    {
+        for (uint16_t x = 0; x < displayWidth; x++) {
+#if defined(ST7789_SOFTWARE_ROTATE_90)
+            const uint16_t srcX = y;
+            const uint16_t srcY = displayHeight - 1 - x;
+#elif defined(ST7789_SOFTWARE_ROTATE_270)
+            const uint16_t srcX = displayWidth - 1 - y;
+            const uint16_t srcY = x;
+#else
+            const uint16_t srcX = x;
+            const uint16_t srcY = y;
+#endif
+            dst[x] = resolvePixelColorBe(srcX, srcY, isPixelSet(srcX, srcY));
+        }
     }
 
     void select()
@@ -463,14 +628,31 @@ class ST7789Spi : public OLEDDisplay {
         const uint16_t y0 = y + TFT_OFFSET_Y;
         const uint16_t x1 = x0 + w - 1;
         const uint16_t y1 = y0 + h - 1;
+        uint8_t data[4];
 
-        writeCommandInTransaction(ST77XX_CASET);
-        write16(x0);
-        write16(x1);
-        writeCommandInTransaction(ST77XX_RASET);
-        write16(y0);
-        write16(y1);
+        encodeRange(data, x0, x1);
+        writeCommandDataInTransaction(ST77XX_CASET, data, sizeof(data));
+        encodeRange(data, y0, y1);
+        writeCommandDataInTransaction(ST77XX_RASET, data, sizeof(data));
         writeCommandInTransaction(ST77XX_RAMWR);
+    }
+
+    static void encodeRange(uint8_t *data, uint16_t start, uint16_t end)
+    {
+        data[0] = start >> 8;
+        data[1] = start & 0xFF;
+        data[2] = end >> 8;
+        data[3] = end & 0xFF;
+    }
+
+    void writeCommandDataInTransaction(uint8_t command, const uint8_t *data, size_t length)
+    {
+        digitalWrite(_dc, LOW);
+        _spi->transfer(command);
+        digitalWrite(_dc, HIGH);
+        if (length > 0) {
+            _spi->transfer(const_cast<uint8_t *>(data), nullptr, length);
+        }
     }
 };
 
