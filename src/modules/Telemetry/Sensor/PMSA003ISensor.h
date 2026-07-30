@@ -4,8 +4,8 @@
 
 #include "../detect/ReClockI2C.h"
 #include "../mesh/generated/meshtastic/telemetry.pb.h"
-#include "RTC.h"
 #include "TelemetrySensor.h"
+#include "gps/RTC.h"
 
 #define PMSA003I_I2C_CLOCK_SPEED 100000
 #define PMSA003I_FRAME_LENGTH 32
@@ -34,10 +34,7 @@ class PMSA003ISensor : public TelemetrySensor
     uint32_t pmMeasureStarted = 0;
 
     uint8_t buffer[PMSA003I_FRAME_LENGTH]{};
-    TwoWire *_bus{};
-    uint8_t _address{};
 #ifdef PMSA003I_I2C_CLOCK_SPEED
-    ScanI2C::I2CPort _port = ScanI2C::I2CPort::NO_I2C;
     ReClockI2C reClockI2C;
 #endif
 };

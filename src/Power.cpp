@@ -13,7 +13,7 @@
  * This file is part of the Meshtastic project.
  * For more information, see: https://meshtastic.org/
  */
-#include "power.h"
+#include "Power.h"
 #include "BluetoothCommon.h"
 #include "MessageStore.h"
 #include "NodeDB.h"
@@ -37,6 +37,7 @@
 #if defined(ARCH_PORTDUINO)
 #include "api/WiFiServerAPI.h"
 #include "input/LinuxInputImpl.h"
+#include "input/LinuxJoystick.h"
 #endif
 
 // Working USB detection for powered/charging states on the RAK platform
@@ -551,7 +552,16 @@ class AnalogBatteryLevel : public HasBatteryLevel
             return sgm41562->isInputPowerGood();
 #endif
 #ifdef EXT_PWR_DETECT
-        return digitalRead(EXT_PWR_DETECT) == EXT_PWR_DETECT_VALUE;
+        if (digitalRead(EXT_PWR_DETECT) == EXT_PWR_DETECT_VALUE)
+            return true;
+#ifdef EXT_CHRG_DETECT
+        // EXT_PWR_DETECT alone may not catch active charging (e.g. a charge-complete
+        // pin that only asserts once the battery is full) - CHRG being active implies
+        // power is present regardless.
+        return digitalRead(EXT_CHRG_DETECT) == EXT_CHRG_DETECT_VALUE;
+#else
+        return false;
+#endif
 
 // technically speaking this should work for all(?) NRF52 boards
 // but needs testing across multiple devices. NRF52 USB would not even work if
@@ -577,7 +587,7 @@ class AnalogBatteryLevel : public HasBatteryLevel
 #endif
 #if defined(ELECROW_ThinkNode_M6)
         return digitalRead(EXT_CHRG_DETECT) == EXT_CHRG_DETECT_VALUE || isVbusIn();
-#elif EXT_CHRG_DETECT
+#elif defined(EXT_CHRG_DETECT)
         return digitalRead(EXT_CHRG_DETECT) == EXT_CHRG_DETECT_VALUE;
 #elif defined(BATTERY_CHARGING_INV)
         return !digitalRead(BATTERY_CHARGING_INV);
@@ -851,12 +861,13 @@ void Power::reboot()
 #ifdef __linux__
     if (aLinuxInputImpl)
         aLinuxInputImpl->deInit();
+    if (aLinuxJoystick)
+        aLinuxJoystick->deInit();
 #endif
     SPI.end();
     Wire.end();
     Serial1.end();
     if (screen) {
-        delete screen;
         screen = nullptr;
     }
     LOG_DEBUG("final reboot!");
@@ -894,7 +905,7 @@ void Power::shutdown()
 #if HAS_SCREEN
     messageStore.saveToFlash();
 #endif
-#if defined(ARCH_NRF52) || defined(ARCH_ESP32) || defined(ARCH_RP2040)
+#if defined(ARCH_NRF52) || defined(ARCH_ESP32) || defined(ARCH_RP2040) || defined(ARCH_STM32WL)
 #ifdef PIN_LED1
     ledOff(PIN_LED1);
 #endif
@@ -1390,6 +1401,22 @@ bool Power::axpChipInit()
             PMU->disablePowerOutput(XPOWERS_DLDO1); // Invalid power channel, it does not exist
             PMU->disablePowerOutput(XPOWERS_DLDO2); // Invalid power channel, it does not exist
             PMU->disablePowerOutput(XPOWERS_VBACKUP);
+        } else if (HW_VENDOR == meshtastic_HardwareModel_TBEAM_BPF) {
+            // T-Beam BPF rail map (per schematic LilyGo_TBeam_BPF r2025-05-08):
+            //   DCDC1  -> ESP32 + OLED 3V3 (always on, protected)
+            //   ALDO2  -> MicroSD 3V3    (OFF at reset, must enable)
+            //   ALDO4  -> L76K GNSS 3V3  (OFF at reset, must enable)
+            //   ALDO1/3, BLDO1/2, DLDO1 -> user headers / unused at boot, leave at reset defaults.
+            // LoRa power is outside the PMU (external P-MOSFET switched by RF95_POWER_EN / IO16).
+            PMU->setPowerChannelVoltage(XPOWERS_ALDO4, 3300);
+            PMU->enablePowerOutput(XPOWERS_ALDO4);
+
+            PMU->setPowerChannelVoltage(XPOWERS_ALDO2, 3300);
+            PMU->enablePowerOutput(XPOWERS_ALDO2);
+
+            // Make sure nothing's driving into an unused rail
+            PMU->disablePowerOutput(XPOWERS_DCDC5);
+            PMU->disablePowerOutput(XPOWERS_DLDO1);
         }
 
         // disable all axp chip interrupt

@@ -4,9 +4,9 @@
 
 #include "../detect/ReClockI2C.h"
 #include "../mesh/generated/meshtastic/telemetry.pb.h"
-#include "RTC.h"
 #include "TelemetrySensor.h"
 #include "Wire.h"
+#include "gps/RTC.h"
 
 // Warm up times for SEN5X from the datasheet
 #ifndef SEN5X_WARMUP_MS_1
@@ -61,10 +61,7 @@ struct _SEN5XMeasurements {
 class SEN5XSensor : public TelemetrySensor
 {
   private:
-    TwoWire *_bus{};
-    uint8_t _address{};
 #ifdef SEN5X_I2C_CLOCK_SPEED
-    ScanI2C::I2CPort _port = ScanI2C::I2CPort::NO_I2C;
     ReClockI2C reClockI2C;
 #endif
 
@@ -158,6 +155,7 @@ See: https://sensirion.com/resource/application_note/low_power_mode/sen5x
 
   public:
     SEN5XSensor();
+    bool probe(TwoWire *bus, uint8_t address, ScanI2C::I2CPort port);
     virtual bool initDevice(TwoWire *bus, ScanI2C::FoundDevice *dev) override;
     virtual bool getMetrics(meshtastic_Telemetry *measurement) override;
 
