@@ -64,7 +64,7 @@ bool RipuSTM32WLTransport::hello()
 
 bool RipuSTM32WLTransport::configure(const RadioConfig &config)
 {
-    uint8_t payload[14] = {};
+    uint8_t payload[kRadioConfigPayloadBytes] = {};
     writeU32(&payload[0], config.frequencyHz);
     writeU16(&payload[4], config.bandwidthKhzX10);
     payload[6] = config.spreadingFactor;
@@ -74,6 +74,7 @@ bool RipuSTM32WLTransport::configure(const RadioConfig &config)
     payload[11] = static_cast<uint8_t>(config.txPowerDbm);
     payload[12] = config.rxBoosted;
     payload[13] = config.flags;
+    writeU16(&payload[14], config.tcxoMillivolts);
 
     size_t responseLength = 0;
     return command(Opcode::ConfigRadio, payload, sizeof(payload), nullptr, 0, responseLength, kRadioCommandTimeoutMs);

@@ -77,6 +77,7 @@ extern "C" {
 
 #define RIPU_RADIO_IRQ (0 + 9)   // P0.09 -> bridge IRQ
 #define RIPU_RADIO_BUSY (0 + 10) // P0.10 -> bridge BUSY
+#define RIPU_RADIO_TCXO_MILLIVOLTS 1800
 
 #define RIPU_RADIO_RESET RIPULORA_NRST // P1.06 -> RipuLora NRST
 #endif

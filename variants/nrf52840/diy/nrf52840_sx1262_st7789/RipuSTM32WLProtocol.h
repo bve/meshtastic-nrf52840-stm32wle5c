@@ -13,6 +13,8 @@ constexpr size_t kMaxPayloadBytes = 270;
 constexpr size_t kHeaderBytes = 10;
 constexpr size_t kCrcBytes = 2;
 constexpr size_t kMaxFrameBytes = kHeaderBytes + kMaxPayloadBytes + kCrcBytes;
+constexpr size_t kRadioConfigLegacyPayloadBytes = 14;
+constexpr size_t kRadioConfigPayloadBytes = 16;
 
 enum class Opcode : uint8_t {
     Hello = 0x01,
@@ -68,6 +70,7 @@ struct RadioConfig {
     int8_t txPowerDbm = 0;
     uint8_t rxBoosted = 1;
     uint8_t flags = ConfigExplicitHeader | ConfigCrcEnabled;
+    uint16_t tcxoMillivolts = 0;
 };
 
 struct EventStatus {

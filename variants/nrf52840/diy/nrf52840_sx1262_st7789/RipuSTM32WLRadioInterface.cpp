@@ -251,8 +251,12 @@ bool RipuSTM32WLRadioInterface::configureBridge()
     bridgeConfig.txPowerDbm = power;
     bridgeConfig.rxBoosted = 1;
     bridgeConfig.flags = ConfigExplicitHeader | ConfigCrcEnabled;
+#if defined(RIPU_RADIO_TCXO_MILLIVOLTS)
+    bridgeConfig.tcxoMillivolts = RIPU_RADIO_TCXO_MILLIVOLTS;
+#endif
 
-    LOG_INFO("RIPU bridge radio freq=%uHz bw=%.1fkHz sf=%u cr=4/%u pwr=%d", bridgeConfig.frequencyHz, bw, sf, cr, power);
+    LOG_INFO("RIPU bridge radio freq=%uHz bw=%.1fkHz sf=%u cr=4/%u pwr=%d tcxo=%umV", bridgeConfig.frequencyHz, bw, sf, cr,
+             power, bridgeConfig.tcxoMillivolts);
     const bool ok = transport_.configure(bridgeConfig);
     if (!ok) {
         logBridgeRadioError("configure");
