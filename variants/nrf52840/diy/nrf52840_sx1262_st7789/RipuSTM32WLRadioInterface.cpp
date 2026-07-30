@@ -60,11 +60,11 @@ bool RipuSTM32WLRadioInterface::reconfigure()
     return configureBridge() && startReceive();
 }
 
-bool RipuSTM32WLRadioInterface::canSleep()
+bool RipuSTM32WLRadioInterface::canSleep(bool deepSleep)
 {
-    const bool canSleepNow = txQueue_.empty() && sendingPacket == nullptr;
+    const bool canSleepNow = txQueue_.empty() && !(deepSleep && sendingPacket != nullptr);
     if (!canSleepNow) {
-        LOG_DEBUG("RIPU radio wait to sleep");
+        LOG_DEBUG("RIPU radio wait to sleep, txEmpty=%d, txInFlight=%d", txQueue_.empty(), sendingPacket != nullptr);
     }
     return canSleepNow;
 }

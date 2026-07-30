@@ -12,7 +12,7 @@ class RipuSTM32WLRadioInterface : public RadioInterface, protected concurrency::
 
     bool init() override;
     bool reconfigure() override;
-    bool canSleep() override;
+    bool canSleep(bool deepSleep) override;
     bool sleep() override;
     ErrorCode send(meshtastic_MeshPacket *p) override;
     meshtastic_QueueStatus getQueueStatus() override;
