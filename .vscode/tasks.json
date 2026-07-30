@@ -10,6 +10,21 @@
         "isDefault": true
       },
       "label": "PlatformIO: Build"
+    },
+    {
+      "label": "Meshtastic: Update (keep local changes)",
+      "type": "shell",
+      "command": "${workspaceFolder}/bin/update-meshtastic.sh",
+      "args": ["upstream", "develop"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
     }
   ]
 }
