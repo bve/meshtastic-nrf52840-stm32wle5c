@@ -249,6 +249,11 @@ static inline void modemPresetToParams(meshtastic_Config_LoRaConfig_ModemPreset 
         cr = 8;
         sf = 12;
         break;
+    case PRESET(VERY_LONG_SLOW):
+        bwKHz = wideLora ? 203.125f : 62.5f;
+        cr = 8;
+        sf = 12;
+        break;
     case PRESET(LITE_FAST):
         bwKHz = 125;
         cr = 5;

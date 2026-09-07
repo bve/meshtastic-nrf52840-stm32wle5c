@@ -306,10 +306,8 @@ __attribute__((weak, noinline)) bool loopCanSleep()
     return true;
 }
 
-// Weak empty variant initialization function.
-// May be redefined by variant files.
+// Optional variant initialization function.
 void lateInitVariant() __attribute__((weak));
-void lateInitVariant() {}
 
 void earlyInitVariant() __attribute__((weak));
 void earlyInitVariant() {}
@@ -1131,7 +1129,8 @@ void setup()
 
     auto rIf = initLoRa();
 
-    lateInitVariant(); // Do board specific init (see extra_variants/README.md for documentation)
+    if (lateInitVariant)
+        lateInitVariant(); // Do board specific init (see extra_variants/README.md for documentation)
 
 #if !MESHTASTIC_EXCLUDE_MQTT
     mqttInit();

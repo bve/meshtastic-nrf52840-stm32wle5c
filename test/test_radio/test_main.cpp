@@ -1,3 +1,4 @@
+#include "DisplayFormatters.h"
 #include "MeshRadio.h"
 #include "MeshService.h"
 #include "RadioInterface.h"
@@ -57,6 +58,21 @@ static void test_bwCodeToKHz_roundTrip()
         uint16_t result = bwKHzToCode(khz);
         TEST_ASSERT_EQUAL_UINT16(code, result);
     }
+}
+
+static void test_veryLongSlowPresetParameters()
+{
+    float bw;
+    uint8_t sf;
+    uint8_t cr;
+
+    modemPresetToParams(meshtastic_Config_LoRaConfig_ModemPreset_VERY_LONG_SLOW, false, bw, sf, cr);
+
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 62.5f, bw);
+    TEST_ASSERT_EQUAL_UINT8(12, sf);
+    TEST_ASSERT_EQUAL_UINT8(8, cr);
+    TEST_ASSERT_EQUAL_STRING("VLongSlow", DisplayFormatters::getModemPresetDisplayName(
+                                              meshtastic_Config_LoRaConfig_ModemPreset_VERY_LONG_SLOW, false, true));
 }
 
 static void test_validateConfigLora_noopWhenUsePresetFalse()
@@ -362,6 +378,7 @@ void setup()
     RUN_TEST(test_bwCodeToKHz_specialMappings);
     RUN_TEST(test_bwCodeToKHz_passthrough);
     RUN_TEST(test_bwCodeToKHz_roundTrip);
+    RUN_TEST(test_veryLongSlowPresetParameters);
     RUN_TEST(test_validateConfigLora_noopWhenUsePresetFalse);
     RUN_TEST(test_validateConfigLora_validPreset_nonWideRegion);
     RUN_TEST(test_validateConfigLora_validPreset_wideRegion);

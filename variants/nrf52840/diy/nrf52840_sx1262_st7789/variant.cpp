@@ -7,6 +7,12 @@ uint16_t getVDDVoltage();
 
 static constexpr uint32_t DISPLAY_TIMEOUT_SECS = 60;
 
+static void applyVariantConfigOverrides()
+{
+    config.display.screen_on_secs = DISPLAY_TIMEOUT_SECS;
+    config.bluetooth.mode = meshtastic_Config_BluetoothConfig_PairingMode_NO_PIN;
+}
+
 const uint32_t g_ADigitalPinMap[] = {
     // P0
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
@@ -83,12 +89,12 @@ void initVariant()
 
 void lateInitVariant()
 {
-    config.display.screen_on_secs = DISPLAY_TIMEOUT_SECS;
+    applyVariantConfigOverrides();
 }
 
 void variantDefaultConfig()
 {
-    config.display.screen_on_secs = DISPLAY_TIMEOUT_SECS;
+    applyVariantConfigOverrides();
     config.lora.region = meshtastic_Config_LoRaConfig_RegionCode_KZ_433;
     config.lora.tx_power = 22;
 }

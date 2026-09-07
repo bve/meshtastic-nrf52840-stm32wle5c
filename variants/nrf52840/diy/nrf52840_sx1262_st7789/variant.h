@@ -22,7 +22,7 @@ extern "C" {
 // This board has no firmware-controllable status LED. P0.15 is the onboard LED on common ProMicro/SuperMini boards.
 #define PIN_LED1 (-1)
 #define LED_STATE_ON 0
-#define PIN_BUTTON1 (0 + 6)   // SW1
+#define PIN_BUTTON1 (0 + 6)    // SW1
 #define ALT_BUTTON_PIN (0 + 8) // SW2
 #define BUTTON_ACTIVE_LOW 1
 #define BUTTON_ACTIVE_PULLUP 1
@@ -68,7 +68,7 @@ extern "C" {
 
 #ifndef NRF52840_STM32WL_ST7789_NO_RADIO
 #define USE_RIPU_STM32WL_RADIO
-#define RIPULORA_NRST (32 + 6) // P1.06 -> RipuLora NRST
+#define RIPULORA_NRST (32 + 6)       // P1.06 -> RipuLora NRST
 #define RIPU_RADIO_SPI_NSS (32 + 11) // P1.11 -> L_CS / RipuLora PB2
 #define LORA_SCK PIN_SPI_SCK
 #define LORA_MISO PIN_SPI_MISO
@@ -77,6 +77,7 @@ extern "C" {
 
 #define RIPU_RADIO_IRQ (0 + 9)   // P0.09 -> bridge IRQ
 #define RIPU_RADIO_BUSY (0 + 10) // P0.10 -> bridge BUSY
+#define MESHTASTIC_ENABLE_VERY_LONG_SLOW 1
 #define RIPU_RADIO_TCXO_MILLIVOLTS 1800
 
 #define RIPU_RADIO_RESET RIPULORA_NRST // P1.06 -> RipuLora NRST
@@ -88,7 +89,7 @@ extern "C" {
 #define ST7789_VDD_EN (0 + 24) // P0.24 -> display VDD
 #define ST7789_CS_GROUNDED 1
 #define ST7789_NSS (0 + 25) // Valid dummy CS; panel CS is tied to GND on this PCB.
-#define ST7789_RS (0 + 11)     // WR
+#define ST7789_RS (0 + 11)  // WR
 #define ST7789_SDA (0 + 22) // SDA / MOSI
 #define ST7789_SCK (0 + 17) // DC / SCLK
 #define ST7789_RESET (32 + 0)

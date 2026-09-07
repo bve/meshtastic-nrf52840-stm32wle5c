@@ -96,10 +96,8 @@ static unsigned char userprefs_admin_key_1[] = USERPREFS_USE_ADMIN_KEY_1;
 static unsigned char userprefs_admin_key_2[] = USERPREFS_USE_ADMIN_KEY_2;
 #endif
 
-// Weak empty variant initialization function.
-// May be redefined by variant files.
+// Optional variant default configuration function.
 void variantDefaultConfig() __attribute__((weak));
-void variantDefaultConfig() {}
 
 void variantDefaultModuleConfig() __attribute__((weak));
 void variantDefaultModuleConfig() {}
@@ -1128,7 +1126,8 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
 #endif
 
     initConfigIntervals();
-    variantDefaultConfig();
+    if (variantDefaultConfig)
+        variantDefaultConfig();
     variantDefaultModuleConfig();
 }
 
