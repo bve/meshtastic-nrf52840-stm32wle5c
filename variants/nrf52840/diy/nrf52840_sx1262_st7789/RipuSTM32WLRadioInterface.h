@@ -5,6 +5,17 @@
 #include "RipuSTM32WLTransport.h"
 #include "concurrency/OSThread.h"
 
+enum class RipuSTM32WLBridgeHealth : uint8_t {
+    Starting = 0,
+    ResetFailed = 1,
+    HelloFailed = 2,
+    ConfigureFailed = 3,
+    StartReceiveFailed = 4,
+    Ready = 5,
+};
+
+RipuSTM32WLBridgeHealth ripuSTM32WLBridgeHealth();
+
 class RipuSTM32WLRadioInterface : public RadioInterface, protected concurrency::OSThread
 {
   public:
@@ -35,6 +46,7 @@ class RipuSTM32WLRadioInterface : public RadioInterface, protected concurrency::
     int32_t runOnce() override;
 
     bool configureBridge();
+    bool initializeBridge();
     bool startReceive();
     bool wakeBridge();
     void logBridgeRadioError(const char *context);
@@ -55,6 +67,7 @@ class RipuSTM32WLRadioInterface : public RadioInterface, protected concurrency::
     MeshPacketQueue txQueue_ = MeshPacketQueue(MAX_TX_QUEUE);
     RipuSTM32WLTransport transport_;
     bool bridgeReady_ = false;
+    bool firmwareUpdatePaused_ = false;
     bool sleeping_ = false;
     bool receiving_ = false;
     bool receiveActive_ = false;

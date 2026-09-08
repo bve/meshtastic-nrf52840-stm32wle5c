@@ -40,7 +40,7 @@ class RipuSTM32WLTransport
                    ripu_stm32wl::Status &status);
     void logBadFrame(ripu_stm32wl::Opcode opcode, const uint8_t *miso, const char *reason) const;
     bool waitReady(uint32_t timeoutMs) const;
-    void transfer(const uint8_t *mosi, uint8_t *miso, size_t length);
+    void transferUnlocked(const uint8_t *mosi, uint8_t *miso, size_t length);
 
     static void writeU16(uint8_t *buffer, uint16_t value);
     static void writeU32(uint8_t *buffer, uint32_t value);

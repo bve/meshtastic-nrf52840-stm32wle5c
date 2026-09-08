@@ -4,9 +4,10 @@
 
 #include "RipuSTM32WLTransport.h"
 
-#include "main.h"
+#include "RipuFirmwareUpdater.h"
 #include "SPILock.h"
 #include "Throttle.h"
+#include "main.h"
 
 #include <cstring>
 
@@ -39,6 +40,14 @@ void RipuSTM32WLTransport::begin()
 
 bool RipuSTM32WLTransport::resetBridge()
 {
+    if (ripuFirmwareUpdateActive()) {
+        return false;
+    }
+
+    concurrency::LockGuard guard(spiLock);
+    if (ripuFirmwareUpdateActive()) {
+        return false;
+    }
     if (resetPin_ < 0) {
         return true;
     }
@@ -54,7 +63,7 @@ bool RipuSTM32WLTransport::hello()
 {
     uint8_t response[4] = {};
     size_t responseLength = 0;
-    const bool ok = command(Opcode::Hello, nullptr, 0, response, sizeof(response), responseLength);
+    const bool ok = command(Opcode::Hello, nullptr, 0, response, sizeof(response), responseLength, kRadioCommandTimeoutMs);
     if (!ok || responseLength < 1 || response[0] != kProtocolVersion) {
         LOG_WARN("RIPU hello ok=%u len=%u data=%02X %02X", ok, static_cast<unsigned>(responseLength), response[0], response[1]);
         return false;
@@ -102,7 +111,8 @@ bool RipuSTM32WLTransport::cad(bool &detected)
 {
     uint8_t response[1] = {};
     size_t responseLength = 0;
-    if (!command(Opcode::Cad, nullptr, 0, response, sizeof(response), responseLength, kRadioCommandTimeoutMs) || responseLength < 1) {
+    if (!command(Opcode::Cad, nullptr, 0, response, sizeof(response), responseLength, kRadioCommandTimeoutMs) ||
+        responseLength < 1) {
         return false;
     }
     detected = response[0] != 0;
@@ -187,6 +197,14 @@ bool RipuSTM32WLTransport::command(Opcode opcode, const uint8_t *request, size_t
                                    size_t responseCapacity, size_t &responseLength, uint32_t timeoutMs)
 {
     responseLength = 0;
+    if (ripuFirmwareUpdateActive()) {
+        return false;
+    }
+
+    concurrency::LockGuard guard(spiLock);
+    if (ripuFirmwareUpdateActive()) {
+        return false;
+    }
     if (requestLength > kMaxPayloadBytes || !waitReady(timeoutMs) || !writeFrame(opcode, request, requestLength)) {
         return false;
     }
@@ -228,7 +246,7 @@ bool RipuSTM32WLTransport::writeFrame(Opcode opcode, const uint8_t *payload, siz
     }
     writeU16(&frame[kHeaderBytes + payloadLength], crc16(&frame[kHeaderBytes], payloadLength));
 
-    transfer(frame, nullptr, sizeof(frame));
+    transferUnlocked(frame, nullptr, sizeof(frame));
     return true;
 }
 
@@ -236,10 +254,10 @@ bool RipuSTM32WLTransport::readFrame(Opcode opcode, uint8_t *payload, size_t cap
 {
     uint8_t mosi[kMaxFrameBytes] = {};
     uint8_t miso[kMaxFrameBytes] = {};
-    transfer(mosi, miso, sizeof(miso));
+    transferUnlocked(mosi, miso, sizeof(miso));
 
-    if (miso[0] != kMagic0 || miso[1] != kMagic1 || miso[2] != kProtocolVersion ||
-        miso[3] != static_cast<uint8_t>(opcode) || miso[4] != sequence_) {
+    if (miso[0] != kMagic0 || miso[1] != kMagic1 || miso[2] != kProtocolVersion || miso[3] != static_cast<uint8_t>(opcode) ||
+        miso[4] != sequence_) {
         logBadFrame(opcode, miso, "hdr");
         return false;
     }
@@ -271,9 +289,9 @@ bool RipuSTM32WLTransport::readFrame(Opcode opcode, uint8_t *payload, size_t cap
 
 void RipuSTM32WLTransport::logBadFrame(Opcode opcode, const uint8_t *miso, const char *reason) const
 {
-    LOG_WARN("RIPU RPC bad %s op=%02X seq=%u miso=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
-             reason, static_cast<uint8_t>(opcode), sequence_, miso[0], miso[1], miso[2], miso[3], miso[4], miso[5],
-             miso[6], miso[7], miso[8], miso[9], miso[10], miso[11]);
+    LOG_WARN("RIPU RPC bad %s op=%02X seq=%u miso=%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", reason,
+             static_cast<uint8_t>(opcode), sequence_, miso[0], miso[1], miso[2], miso[3], miso[4], miso[5], miso[6], miso[7],
+             miso[8], miso[9], miso[10], miso[11]);
 }
 
 bool RipuSTM32WLTransport::waitReady(uint32_t timeoutMs) const
@@ -292,10 +310,8 @@ bool RipuSTM32WLTransport::waitReady(uint32_t timeoutMs) const
     return true;
 }
 
-void RipuSTM32WLTransport::transfer(const uint8_t *mosi, uint8_t *miso, size_t length)
+void RipuSTM32WLTransport::transferUnlocked(const uint8_t *mosi, uint8_t *miso, size_t length)
 {
-    concurrency::LockGuard guard(spiLock);
-
     spi_.beginTransaction(spiSettings_);
     digitalWrite(csPin_, LOW);
     delayMicroseconds(20);

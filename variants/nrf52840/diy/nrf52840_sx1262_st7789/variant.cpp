@@ -1,6 +1,7 @@
 #include "variant.h"
 
 #include "Arduino.h"
+#include "RipuFirmwareUpdater.h"
 #include "mesh/NodeDB.h"
 
 uint16_t getVDDVoltage();
@@ -90,6 +91,7 @@ void initVariant()
 void lateInitVariant()
 {
     applyVariantConfigOverrides();
+    ripuFirmwareUsbInitialize();
 }
 
 void variantDefaultConfig()

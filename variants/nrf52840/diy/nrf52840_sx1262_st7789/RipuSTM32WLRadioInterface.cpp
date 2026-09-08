@@ -5,6 +5,7 @@
 #include "RipuSTM32WLRadioInterface.h"
 
 #include "PowerMon.h"
+#include "RipuFirmwareUpdater.h"
 #include "Throttle.h"
 #include "airtime.h"
 #include "error.h"
@@ -12,13 +13,26 @@
 
 #include <algorithm>
 #include <assert.h>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 
 using namespace ripu_stm32wl;
 
-RipuSTM32WLRadioInterface::RipuSTM32WLRadioInterface(SPIClass &spi, SPISettings spiSettings, int csPin, int irqPin,
-                                                     int busyPin, int resetPin)
+namespace
+{
+
+std::atomic<RipuSTM32WLBridgeHealth> bridgeHealth{RipuSTM32WLBridgeHealth::Starting};
+
+} // namespace
+
+RipuSTM32WLBridgeHealth ripuSTM32WLBridgeHealth()
+{
+    return bridgeHealth.load(std::memory_order_acquire);
+}
+
+RipuSTM32WLRadioInterface::RipuSTM32WLRadioInterface(SPIClass &spi, SPISettings spiSettings, int csPin, int irqPin, int busyPin,
+                                                     int resetPin)
     : OSThread("RipuRadio", kPollIntervalMs), transport_(spi, spiSettings, csPin, irqPin, busyPin, resetPin)
 {
 }
@@ -30,23 +44,37 @@ bool RipuSTM32WLRadioInterface::init()
 
     bridgeReady_ = false;
     sleeping_ = false;
+    if (!initializeBridge()) {
+        firmwareUpdatePaused_ = true;
+    }
+    return true;
+}
+
+bool RipuSTM32WLRadioInterface::initializeBridge()
+{
+    bridgeHealth.store(RipuSTM32WLBridgeHealth::Starting, std::memory_order_release);
     if (!transport_.resetBridge()) {
+        bridgeHealth.store(RipuSTM32WLBridgeHealth::ResetFailed, std::memory_order_release);
         LOG_WARN("RIPU STM32WL bridge reset/ready failed");
         return false;
     }
     if (!transport_.hello()) {
+        bridgeHealth.store(RipuSTM32WLBridgeHealth::HelloFailed, std::memory_order_release);
         LOG_WARN("RIPU STM32WL bridge hello failed");
         return false;
     }
     if (!configureBridge()) {
+        bridgeHealth.store(RipuSTM32WLBridgeHealth::ConfigureFailed, std::memory_order_release);
         LOG_WARN("RIPU STM32WL bridge configure failed");
         return false;
     }
     if (!startReceive()) {
+        bridgeHealth.store(RipuSTM32WLBridgeHealth::StartReceiveFailed, std::memory_order_release);
         return false;
     }
 
     bridgeReady_ = true;
+    bridgeHealth.store(RipuSTM32WLBridgeHealth::Ready, std::memory_order_release);
     LOG_INFO("RIPU STM32WL bridge init success");
     return bridgeReady_;
 }
@@ -54,7 +82,7 @@ bool RipuSTM32WLRadioInterface::init()
 bool RipuSTM32WLRadioInterface::reconfigure()
 {
     RadioInterface::reconfigure();
-    if (!bridgeReady_) {
+    if (!bridgeReady_ || ripuFirmwareUpdateActive()) {
         return false;
     }
     return configureBridge() && startReceive();
@@ -62,6 +90,9 @@ bool RipuSTM32WLRadioInterface::reconfigure()
 
 bool RipuSTM32WLRadioInterface::canSleep(bool deepSleep)
 {
+    if (ripuFirmwareUpdateActive()) {
+        return false;
+    }
     const bool canSleepNow = txQueue_.empty() && !(deepSleep && sendingPacket != nullptr);
     if (!canSleepNow) {
         LOG_DEBUG("RIPU radio wait to sleep, txEmpty=%d, txInFlight=%d", txQueue_.empty(), sendingPacket != nullptr);
@@ -71,6 +102,9 @@ bool RipuSTM32WLRadioInterface::canSleep(bool deepSleep)
 
 bool RipuSTM32WLRadioInterface::sleep()
 {
+    if (ripuFirmwareUpdateActive()) {
+        return false;
+    }
     if (!bridgeReady_) {
         return true;
     }
@@ -90,6 +124,11 @@ bool RipuSTM32WLRadioInterface::sleep()
 
 ErrorCode RipuSTM32WLRadioInterface::send(meshtastic_MeshPacket *p)
 {
+    if (ripuFirmwareUpdateActive()) {
+        packetPool.release(p);
+        return ERRNO_DISABLED;
+    }
+
 #ifndef DISABLE_WELCOME_UNSET
     if (config.lora.region == meshtastic_Config_LoRaConfig_RegionCode_UNSET) {
         LOG_WARN("send - lora tx disabled: Region unset");
@@ -197,7 +236,7 @@ bool RipuSTM32WLRadioInterface::removePendingTXPacket(NodeNum from, PacketId id,
 
 bool RipuSTM32WLRadioInterface::isIRQPending()
 {
-    return transport_.isIrqPending();
+    return !ripuFirmwareUpdateActive() && transport_.isIrqPending();
 }
 
 uint32_t RipuSTM32WLRadioInterface::getPacketTime(uint32_t totalPacketLen, bool received)
@@ -212,12 +251,44 @@ uint32_t RipuSTM32WLRadioInterface::getPacketTime(uint32_t totalPacketLen, bool 
         8.0f + std::max(ceilf(((8.0f * totalPacketLen - 4.0f * sf + 28.0f + 16.0f - 20.0f * headerDisabled) /
                                (4.0f * (sf - 2.0f * lowDataRateOptimize))) *
                               cr),
-                         0.0f);
+                        0.0f);
     return static_cast<uint32_t>((preambleTime + payloadSymbols * symbolTime) * 1000.0f);
 }
 
 int32_t RipuSTM32WLRadioInterface::runOnce()
 {
+    if (ripuFirmwareUpdateActive()) {
+        if (!firmwareUpdatePaused_) {
+            firmwareUpdatePaused_ = true;
+            bridgeReady_ = false;
+            bridgeHealth.store(RipuSTM32WLBridgeHealth::Starting, std::memory_order_release);
+            sleeping_ = false;
+            txDelayActive_ = false;
+            stopReceiveState();
+            finishSending(false);
+            if (powerMon) {
+                powerMon->clearState(meshtastic_PowerMon_State_Lora_TXOn);
+            }
+            LOG_INFO("RIPU radio paused for firmware update");
+        }
+        return 50;
+    }
+
+    if (ripuFirmwareTakeRecoveryRequest()) {
+        firmwareUpdatePaused_ = true;
+    }
+    if (firmwareUpdatePaused_) {
+        bridgeReady_ = false;
+        bridgeHealth.store(RipuSTM32WLBridgeHealth::Starting, std::memory_order_release);
+        sleeping_ = false;
+        if (!initializeBridge()) {
+            LOG_WARN("RIPU radio recovery after firmware update failed");
+            return 1000;
+        }
+        firmwareUpdatePaused_ = false;
+        LOG_INFO("RIPU radio resumed after firmware update");
+    }
+
     if (!bridgeReady_) {
         return 1000;
     }
@@ -255,8 +326,8 @@ bool RipuSTM32WLRadioInterface::configureBridge()
     bridgeConfig.tcxoMillivolts = RIPU_RADIO_TCXO_MILLIVOLTS;
 #endif
 
-    LOG_INFO("RIPU bridge radio freq=%uHz bw=%.1fkHz sf=%u cr=4/%u pwr=%d tcxo=%umV", bridgeConfig.frequencyHz, bw, sf, cr,
-             power, bridgeConfig.tcxoMillivolts);
+    LOG_INFO("RIPU bridge radio freq=%uHz bw=%.1fkHz sf=%u cr=4/%u pwr=%d tcxo=%umV", bridgeConfig.frequencyHz, bw, sf, cr, power,
+             bridgeConfig.tcxoMillivolts);
     const bool ok = transport_.configure(bridgeConfig);
     if (!ok) {
         logBridgeRadioError("configure");

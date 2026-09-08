@@ -3,7 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace ripu_stm32wl {
+namespace ripu_stm32wl
+{
 
 constexpr uint8_t kProtocolVersion = 1;
 constexpr uint8_t kMagic0 = 'R';
@@ -15,6 +16,10 @@ constexpr size_t kCrcBytes = 2;
 constexpr size_t kMaxFrameBytes = kHeaderBytes + kMaxPayloadBytes + kCrcBytes;
 constexpr size_t kRadioConfigLegacyPayloadBytes = 14;
 constexpr size_t kRadioConfigPayloadBytes = 16;
+constexpr uint8_t kBootloaderProtocolVersion = 1;
+constexpr uint32_t kFlashBaseAddress = 0x08000000UL;
+constexpr uint32_t kApplicationAddress = 0x08008000UL;
+constexpr size_t kBootloaderMaxChunkBytes = 256;
 
 enum class Opcode : uint8_t {
     Hello = 0x01,
@@ -29,6 +34,11 @@ enum class Opcode : uint8_t {
     Sleep = 0x0B,
     Wake = 0x0C,
     GetRandom = 0x0D,
+    BootInfo = 0x70,
+    BootBegin = 0x71,
+    BootWrite = 0x72,
+    BootVerify = 0x73,
+    BootRun = 0x74,
 };
 
 enum class Status : uint8_t {
@@ -39,6 +49,11 @@ enum class Status : uint8_t {
     RadioError = 0x04,
     Overflow = 0x05,
     NotReady = 0x06,
+    InvalidAddress = 0x07,
+    InvalidSize = 0x08,
+    VerifyFailed = 0x09,
+    InvalidState = 0x0A,
+    FlashError = 0x0B,
 };
 
 enum Event : uint16_t {
@@ -88,5 +103,6 @@ struct PacketMetadata {
 };
 
 uint16_t crc16(const uint8_t *data, size_t length);
+uint32_t crc32(const uint8_t *data, size_t length);
 
 } // namespace ripu_stm32wl
